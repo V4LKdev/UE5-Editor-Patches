@@ -1,0 +1,177 @@
+diff --git a/Engine/Source/Editor/UnrealEd/Classes/Settings/LevelEditorViewportSettings.h b/Engine/Source/Editor/UnrealEd/Classes/Settings/LevelEditorViewportSettings.h
+index 762280db8746..1185182d7099 100644
+--- a/Engine/Source/Editor/UnrealEd/Classes/Settings/LevelEditorViewportSettings.h
++++ b/Engine/Source/Editor/UnrealEd/Classes/Settings/LevelEditorViewportSettings.h
+@@ -324,7 +324,11 @@ class ULevelEditorViewportSettings
+ 	/** Allow translate/rotate widget */
+ 	UPROPERTY(EditAnywhere, config, Category=LookAndFeel, meta=( DisplayName = "Enable Combined Translate/Rotate Widget" ))
+ 	uint32 bAllowTranslateRotateZWidget:1;
+-
++	
++	/** Use camera facing translate and scale widgets */
++	UPROPERTY(EditAnywhere, config, Category=LookAndFeel, meta=( DisplayName = "Enable Camera Facing Widget" ))
++	uint32 bAllowCameraFacingWidget : 1;
++	
+ 	/** Allow arcball rotation with rotate widget */
+ 	UPROPERTY(EditAnywhere, config, Category = LookAndFeel, meta = (DisplayName = "Enable Arcball Rotate"))
+ 	uint32 bAllowArcballRotate : 1;
+diff --git a/Engine/Source/Editor/UnrealEd/Private/MouseDeltaTracker.cpp b/Engine/Source/Editor/UnrealEd/Private/MouseDeltaTracker.cpp
+index 1a3b38025d2a..25aaba38f752 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/MouseDeltaTracker.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/MouseDeltaTracker.cpp
+@@ -289,6 +289,10 @@ void FMouseDeltaTracker::StartTracking(FEditorViewportClient* InViewportClient,
+ 	bExternalMovement = false;	//no external movement has occurred yet.
+ 	InViewportClient->Widget->ResetDeltaRotation();
+ 
++	// Store the direction to the widget for the camera facing widget
++	FVector DirectionToWidget = InViewportClient->GetWidgetLocation() - InViewportClient->GetViewLocation();
++	DirectionToWidget.Normalize();
++	InViewportClient->Widget->SetCachedDirToWidget( DirectionToWidget );
+ }
+ 
+ /**
+diff --git a/Engine/Source/Editor/UnrealEd/Private/UnrealWidget.cpp b/Engine/Source/Editor/UnrealEd/Private/UnrealWidget.cpp
+index 71544d6d177d..51548abd3716 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/UnrealWidget.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/UnrealWidget.cpp
+@@ -104,17 +104,29 @@ void FWidget::SetUsesEditorModeTools(FEditorModeTools* InEditorModeTools)
+ 
+ void FWidget::ConvertMouseToAxis_Translate(FVector2D DragDir, FVector& InOutDelta, FVector& OutDrag) const
+ {
++	FVector2D CorrectedXAxisDir = XAxisDir;
++	FVector2D CorrectedYAxisDir = YAxisDir;
++	FVector2D CorrectedZAxisDir = ZAxisDir;
++
++	if (GetDefault<ULevelEditorViewportSettings>()->bAllowCameraFacingWidget)
++	{
++		// Correct the axis directions based on the direction to the widget to prevent inverted movement 
++		CorrectedXAxisDir = FVector::DotProduct(CachedDirToWidget, FVector(1, 0, 0)) > 0 ? -XAxisDir : XAxisDir;
++		CorrectedYAxisDir = FVector::DotProduct(CachedDirToWidget, FVector(0, 1, 0)) > 0 ? -YAxisDir : YAxisDir;
++		CorrectedZAxisDir = FVector::DotProduct(CachedDirToWidget, FVector(0, 0, 1)) > 0 ? -ZAxisDir : ZAxisDir;
++	}
++	
+ 	// Get drag delta in widget axis space
+-	OutDrag = FVector((CurrentAxis & EAxisList::X) ? FVector2D::DotProduct(XAxisDir, DragDir) : 0.0f,
+-	                  (CurrentAxis & EAxisList::Y) ? FVector2D::DotProduct(YAxisDir, DragDir) : 0.0f,
+-	                  (CurrentAxis & EAxisList::Z) ? FVector2D::DotProduct(ZAxisDir, DragDir) : 0.0f);
++	OutDrag = FVector((CurrentAxis & EAxisList::X) ? FVector2D::DotProduct(CorrectedXAxisDir, DragDir) : 0.0f,
++					  (CurrentAxis & EAxisList::Y) ? FVector2D::DotProduct(CorrectedYAxisDir, DragDir) : 0.0f,
++					  (CurrentAxis & EAxisList::Z) ? FVector2D::DotProduct(CorrectedZAxisDir, DragDir) : 0.0f);
+ 
+ 	// Snap to grid in widget axis space
+ 	const FVector GridSize = FVector(GEditor->GetGridSize());
+ 	FSnappingUtils::SnapPointToGrid(OutDrag, GridSize);
+ 
+ 	// Convert to effective screen space delta, and replace input delta, adjusted for inverted screen space Y axis
+-	const FVector2D EffectiveDelta = OutDrag.X * XAxisDir + OutDrag.Y * YAxisDir + OutDrag.Z * ZAxisDir;
++	const FVector2D EffectiveDelta = OutDrag.X * CorrectedXAxisDir + OutDrag.Y * CorrectedYAxisDir + OutDrag.Z * CorrectedZAxisDir;
+ 	InOutDelta                     = FVector(EffectiveDelta.X, -EffectiveDelta.Y, 0.0f);
+ 
+ 	if (AxisDisplayInfo::GetAxisDisplayCoordinateSystem() == EAxisList::LeftUpForward)
+diff --git a/Engine/Source/Editor/UnrealEd/Private/UnrealWidgetRender.cpp b/Engine/Source/Editor/UnrealEd/Private/UnrealWidgetRender.cpp
+index 0a2bf476c76e..d955ea5b235e 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/UnrealWidgetRender.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/UnrealWidgetRender.cpp
+@@ -449,6 +449,38 @@ void DrawDualAxis( FPrimitiveDrawInterface* PDI, const FMatrix& BoxToWorld,const
+ 	DrawCornerHelper(PDI, BoxToWorld, Length, Thickness, Axis2Mat, SDPG_Foreground);
+ 	DrawCornerHelper(PDI, FScaleMatrix(FVector(-1, 1, 1)) * FRotationMatrix(FRotator(-90, 0, 0)) * BoxToWorld, Length, Thickness, AxisMat, SDPG_Foreground);
+ }
++
++/**
++ * Calculates the orientation matrix for the widget based on the current view widget location
++ */
++FMatrix FWidget::CreateWidgetOrientationMatrix(const FSceneView* View, const FEditorViewportClient* ViewportClient, const FVector& InLocation) const
++{
++	if (!GetDefault<ULevelEditorViewportSettings>()->bAllowCameraFacingWidget)
++	{
++		// Return the default orientation matrix
++		return CustomCoordSystem * FTranslationMatrix(InLocation);
++	}
++
++	// Calculate the direction to the widget from the camera
++	const FVector DirectionToWidget = bDragging == true ? CachedDirToWidget : (InLocation - ViewportClient->GetViewLocation()).GetSafeNormal();
++
++	FVector XAxis = CustomCoordSystem.TransformVector(FVector(1, 0, 0));
++	FVector YAxis = CustomCoordSystem.TransformVector(FVector(0, 1, 0));
++	FVector ZAxis = CustomCoordSystem.TransformVector(FVector(0, 0, 1));
++
++	// Adjust axes to face the camera
++	XAxis = (FVector::DotProduct(DirectionToWidget, XAxis) > 0) ? -XAxis : XAxis;
++	YAxis = (FVector::DotProduct(DirectionToWidget, YAxis) > 0) ? -YAxis : YAxis;
++	ZAxis = (FVector::DotProduct(DirectionToWidget, ZAxis) > 0) ? -ZAxis : ZAxis;
++
++	return FMatrix(
++		FPlane(XAxis, 0),
++		FPlane(YAxis, 0),
++		FPlane(ZAxis, 0),
++		FPlane(InLocation, 1)
++	);
++}
++
+ /**
+  * Draws the translation widget.
+  */
+@@ -461,7 +493,7 @@ void FWidget::Render_Translate( const FSceneView* View, FPrimitiveDrawInterface*
+ 	FColor CurrentScreenColor = ( CurrentAxis & EAxisList::Screen ? CurrentColor : ScreenSpaceColor );
+ 
+ 	// Figure out axis matrices
+-	FMatrix WidgetMatrix = CustomCoordSystem * FTranslationMatrix( InLocation );
++	FMatrix WidgetMatrix = CreateWidgetOrientationMatrix(View, ViewportClient, InLocation);
+ 	const EAxisList::Type DrawAxis = GetAxisToDraw( ViewportClient->GetWidgetMode() );
+ 	const bool bDisabled = IsWidgetDisabled();
+ 
+@@ -767,7 +799,7 @@ void FWidget::Render_Scale( const FSceneView* View,FPrimitiveDrawInterface* PDI,
+ 	UMaterialInstanceDynamic* ZMaterial = ( CurrentAxis&EAxisList::Z ? CurrentAxisMaterial : AxisMaterialZ );
+ 	UMaterialInstanceDynamic* XYZMaterial = ( CurrentAxis&EAxisList::XYZ ? CurrentAxisMaterial : OpaquePlaneMaterialXY );
+ 
+-	FMatrix WidgetMatrix = CustomCoordSystem * FTranslationMatrix( InLocation );
++	FMatrix WidgetMatrix = CreateWidgetOrientationMatrix(View, ViewportClient, InLocation);
+ 	const EAxisList::Type DrawAxis = GetAxisToDraw( ViewportClient->GetWidgetMode() );
+ 	const float ExternalScale = EditorModeTools ? EditorModeTools->GetWidgetScale() : 1.0f;
+ 	FSpaceDescriptor Space(View, ViewportClient, InLocation, ExternalScale);
+@@ -866,7 +898,7 @@ void FWidget::Render_TranslateRotateZ( const FSceneView* View, FPrimitiveDrawInt
+ 	UMaterialInterface* ZMaterial = CurrentAxis&EAxisList::Z ? CurrentAxisMaterial : AxisMaterialZ;
+ 
+ 	// Figure out axis matrices
+-	FMatrix AxisMatrix = CustomCoordSystem * FTranslationMatrix( InLocation );
++	FMatrix AxisMatrix = CreateWidgetOrientationMatrix(View, ViewportClient, InLocation);
+ 	EAxisList::Type DrawAxis = GetAxisToDraw( ViewportClient->GetWidgetMode() );
+ 
+ 	const float ExternalScale = EditorModeTools ? EditorModeTools->GetWidgetScale() : 1.0f;
+diff --git a/Engine/Source/Editor/UnrealEd/Public/UnrealWidget.h b/Engine/Source/Editor/UnrealEd/Public/UnrealWidget.h
+index 75e69f27a974..ca7245078d6c 100644
+--- a/Engine/Source/Editor/UnrealEd/Public/UnrealWidget.h
++++ b/Engine/Source/Editor/UnrealEd/Public/UnrealWidget.h
+@@ -176,6 +176,11 @@ public:
+ 	{
+ 		return (2.f * (float)PI) / 360.f;
+ 	}
++	
++	void SetCachedDirToWidget(const FVector& InDirection)
++	{
++		CachedDirToWidget = InDirection;
++	}
+ 
+ private:
+ 	void ConvertMouseToAxis_Translate(FVector2D DragDir, FVector& InOutDelta, FVector& OutDrag) const;
+@@ -243,7 +248,9 @@ private:
+ 	void Render_2D(const FSceneView* View, FPrimitiveDrawInterface* PDI, FEditorViewportClient* ViewportClient,
+ 	               const FVector& InLocation, bool bDrawWidget);
+ 
+-
++	/** Helper function to create a matrix that orients the Translate/Scale widget based on the current view */
++	FMatrix CreateWidgetOrientationMatrix(const FSceneView* View, const FEditorViewportClient* ViewportClient, const FVector& InLocation) const;
++	
+ 	struct FThickArcParams
+ 	{
+ 		FThickArcParams(FPrimitiveDrawInterface* InPDI, const FVector& InPosition, UMaterialInterface* InMaterial,
+@@ -433,6 +440,9 @@ private:
+ 	/** Any mode tools being used */
+ 	FEditorModeTools* EditorModeTools;
+ 
++	/** The direction from the viewport camera to the widget at the start of a drag */
++	FVector CachedDirToWidget;
++	
+ 	/**
+ 	 * An extra matrix to apply to the widget before drawing it (allows for local/custom coordinate systems).
+ 	 */

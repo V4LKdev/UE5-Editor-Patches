@@ -1,0 +1,98 @@
+diff --git a/Engine/Source/Editor/LevelEditor/Private/LevelEditorToolBar.cpp b/Engine/Source/Editor/LevelEditor/Private/LevelEditorToolBar.cpp
+index 6f809ec9e163..1dbf825f9ee2 100644
+--- a/Engine/Source/Editor/LevelEditor/Private/LevelEditorToolBar.cpp
++++ b/Engine/Source/Editor/LevelEditor/Private/LevelEditorToolBar.cpp
+@@ -1637,49 +1637,56 @@ TSharedRef< SWidget > FLevelEditorToolBar::MakeLevelEditorToolBar( const TShared
+ 					UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.AssetsToolBar", MenuContext)
+ 				]
+ 				
+-			]
+-			+ SHorizontalBox::Slot()
+-			.HAlign(HAlign_Left)
+-			.AutoWidth()
+-			[
+-				SNew(SBorder)
+-				.Padding(0.f)
+-				.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
++				]
++				+ SHorizontalBox::Slot()
++				.FillWidth(2.1f)
+ 				[
+-					UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.PlayToolBar", MenuContext) // Always enabled
++					SNew(SSpacer)
+ 				]
+-				
+-			]
+-			+ SHorizontalBox::Slot()
+-			.HAlign(HAlign_Fill)
+-			.FillWidth(1.0f)
+-			[
+-				SNew(SBorder)
+-				.Padding(0.f)
+-				.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
+-				.IsEnabled(FSlateApplication::Get().GetNormalExecutionAttribute())
++				+ SHorizontalBox::Slot()
++				.AutoWidth()
++				.HAlign(HAlign_Center) // Center-align the toolbar content
++				[
++					SNew(SBox)
++					.WidthOverride(400.0f) // This value roughly matches the Play toolbar's width
++					[
++						SNew(SBorder)
++						.Padding(0)
++						.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
++						[
++							UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.PlayToolBar", MenuContext)
++						]
++					]
++				]
++				+ SHorizontalBox::Slot()
++				.HAlign(HAlign_Left)
+ 				[
+-					UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.User", MenuContext)
++					SNew(SBorder)
++					.Padding(0)
++					.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
++					.IsEnabled(FSlateApplication::Get().GetNormalExecutionAttribute())
++					[
++						UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.User", MenuContext)
++					]
+ 				]
+-			]
+-			+ SHorizontalBox::Slot()
+-			.HAlign(HAlign_Right)
+-			.AutoWidth()
+-			.Padding(0.0f, 0.0f, 7.0f, 0.0f)
+-			[
+-				SNew(SBorder)
+-				.Visibility_Lambda([]
+-				{
+-					return UE::Editor::Private::CVarLevelEditorToolbarSettingsValue != 0 ? EVisibility::Visible : EVisibility::Collapsed;
+-				})
+-				.Padding(0.f)
+-				.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
+-				.IsEnabled(FSlateApplication::Get().GetNormalExecutionAttribute())
++				+ SHorizontalBox::Slot()
++				.FillWidth(0.5f)
++				[
++					SNew(SSpacer)
++ 				]
++				+ SHorizontalBox::Slot()
++				.HAlign(HAlign_Right)
++				.Padding(0.0f, 0.0f, 7.0f, 0.0f)
+ 				[
+-					UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.SettingsToolBar", MenuContext)
++					SNew(SBorder)
++					.Padding(0)
++					.BorderImage(FAppStyle::Get().GetBrush("NoBorder"))
++					.IsEnabled(FSlateApplication::Get().GetNormalExecutionAttribute())
++					[
++						UToolMenus::Get()->GenerateWidget("LevelEditor.LevelEditorToolBar.SettingsToolBar", MenuContext)
++					]
+ 				]
+-			]
+-		];
++			];
+ }
+ 
+ static void MakeScalabilityMenu( UToolMenu* InMenu )
