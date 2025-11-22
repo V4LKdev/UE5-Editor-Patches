@@ -77,3 +77,19 @@ From your Unreal Engine source root:
 ```bash
 git apply <path-to-this-repo>/patches/camera-facing-gizmo.patch
 git apply <path-to-this-repo>/patches/centered-pie-toolbar.patch
+```
+
+To preview what a patch will change before applying:
+```bash
+git apply --stat <patchfile>
+git apply --check <patchfile>
+```
+To revert (if already applied):
+```bash
+git apply -R <patchfile>
+```
+## Notes
+
+These patches are small and self-contained, and integrate well with the exisiting source code.
+
+A third editor tweak (dragging actors from Outliner into the world) is currently in development and not part of this repo yet.
